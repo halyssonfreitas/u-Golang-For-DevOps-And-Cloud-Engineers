@@ -15,13 +15,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 )
 
 // {"page":"words","input":"marieli","words":["marieli"]}
+
+type Response interface {
+	GetResponse() string
+}
 
 type Page struct {
 	Page string `json:"page"`
@@ -33,9 +37,21 @@ type Words struct {
 	Words []string `json:"words"`
 }
 
+func (w Words) GetResponse() string {
+	return fmt.Sprintf("%s", strings.Join(w.Words, ", "))
+}
+
 type Occurrence struct {
 	Page
 	Words map[string]int `json:"words"`
+}
+
+func (o Occurrence) GetResponse() string {
+	out := []string{}
+	for word, ocurrence := range o.Words {
+		out = append(out, fmt.Sprintf("%s (%d)", word, ocurrence))
+	}
+	return fmt.Sprintf("%s", strings.Join(out, ", "))
 }
 
 func main() {
@@ -46,14 +62,28 @@ func main() {
 		os.Exit(1)
 	}
 
-	if _, err := url.ParseRequestURI(args[1]); err != nil {
-		fmt.Printf("URL is in invalida format: %s\n", err)
+	res, err := doRequest(args[1])
+	if err != nil {
+		fmt.Printf("Error: %s\n", err)
 		os.Exit(1)
 	}
 
-	resp, err := http.Get(args[1])
+	if res == nil {
+		fmt.Printf("No response\n")
+		os.Exit(1)
+	}
+
+	fmt.Printf("Response: %s\n", res.GetResponse())
+}
+
+func doRequest(requestURL string) (Response, error) {
+	if _, err := url.ParseRequestURI(requestURL); err != nil {
+		return nil, fmt.Errorf("URL is in invalida format: %s\n", err)
+	}
+
+	resp, err := http.Get(requestURL)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("Http get error: %s", err)
 	}
 
 	defer resp.Body.Close()
@@ -61,19 +91,18 @@ func main() {
 	body, err := io.ReadAll(resp.Body)
 
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("ReadAll error: %s", err)
 	}
 
 	if resp.StatusCode != 200 {
-		fmt.Printf("Invalid output (HTTP Code %d): %s\n", resp.StatusCode, body)
-		os.Exit(1)
+		return nil, fmt.Errorf("Invalid output (HTTP Code %d): %s\n", resp.StatusCode, body)
 	}
 
 	var page Page
 
 	err = json.Unmarshal(body, &page)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("Unmarshal error: %s", err)
 	}
 
 	prettyJSON, _ := json.MarshalIndent(page, "", "  ")
@@ -86,26 +115,18 @@ func main() {
 
 		err = json.Unmarshal(body, &occurrence)
 		if err != nil {
-			log.Fatal(err)
+			return nil, fmt.Errorf("Unmarshal error: %s", err)
 		}
-
-		prettyJSON, _ := json.MarshalIndent(occurrence, "", "  ")
-
-		fmt.Println(string(prettyJSON))
+		return occurrence, nil
 	case "words":
 		var words Words
 
 		err = json.Unmarshal(body, &words)
 		if err != nil {
-			log.Fatal(err)
+			return nil, fmt.Errorf("Unmarshal error: %s", err)
 		}
-
-		prettyJSON, _ := json.MarshalIndent(words, "", "  ")
-
-		fmt.Println(string(prettyJSON))
-	default:
-		fmt.Println("Page not found!")
-		println()
+		return words, nil
 	}
 
+	return nil, nil
 }
